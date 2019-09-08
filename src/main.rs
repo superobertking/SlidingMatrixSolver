@@ -22,7 +22,7 @@ fn main() {
     assert_eq!(map.len(), (dim * dim) as usize, "Dimension not match!");
 
     let res = astar::do_astar(dim, map);
-    println!("{:?}", res);
+    println!("{:?} {}", res, res.len());
 }
 
 fn get_arg() -> u8 {
@@ -45,17 +45,23 @@ mod astar {
     use super::Operation;
     use std::cmp::{Ord, Ordering};
 
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Step {
+        op: Operation,
+        jump: u8,
+        pos: u8, // col if Up | Down, row if Left | Right
+    }
+
     #[derive(Clone, PartialEq, Eq, Debug)]
     struct State {
-        pos: (u8, u8),
         cost: usize, // steps.len() + heuristic value
         map: Vec<u8>,
-        steps: Vec<(Operation, u8)>, // (Op, jumps)
+        steps: Vec<Step>, // (Op, jumps)
     }
 
     impl State {
         #[inline]
-        fn last_step(&self) -> (Operation, u8) {
+        fn last_step(&self) -> Step {
             *self.steps.last().unwrap()
         }
     }
@@ -108,7 +114,7 @@ mod astar {
         }
     }
 
-    pub fn do_astar(dim: u8, map: Vec<u8>) -> Vec<(Operation, u8)> {
+    pub fn do_astar(dim: u8, map: Vec<u8>) -> Vec<Step> {
         use std::collections::BinaryHeap;
         use Operation::*;
 
@@ -117,10 +123,13 @@ mod astar {
 
         // init state
         queue.push(Box::new(State {
-            pos: (0, 0),
             cost: calc_h(dim, &map),
             map: map,
-            steps: vec![(Nop, 0)],
+            steps: vec![Step {
+                op: Nop,
+                jump: 0,
+                pos: 0,
+            }],
         }));
 
         let all_dirs = get_all_directions(dim);
@@ -140,7 +149,7 @@ mod astar {
 
             let last_state = queue.pop().unwrap();
 
-            if true {
+            if false {
                 if iterations % 20000 == 0 {
                     println!("{} {}", last_state.steps.len(), last_state.cost);
                     println!("{}", queue.len());
@@ -149,69 +158,56 @@ mod astar {
                 }
             }
 
-            let next_dirs = get_next_directions(&all_dirs, last_state.last_step().0);
+            let next_dirs = get_next_directions(&all_dirs, last_state.last_step().op);
 
-            for (op, jump) in next_dirs {
-                let (op, jump) = (*op, *jump);
-                let mut next_state = last_state.clone();
+            for pos in 0..dim {
+                for (op, jump) in next_dirs {
+                    let (op, jump) = (*op, *jump);
+                    let mut next_state = last_state.clone();
 
-                // push current step
-                next_state.steps.push((op, jump));
+                    // push current step
+                    next_state.steps.push(Step { op, jump, pos });
 
-                // old positions
-                let (px, py) = last_state.pos;
-                // update map
-                if op == Up {
-                    for i in 0..dim - jump {
-                        next_state.map[(i * dim + py) as usize] =
-                            last_state.map[((i + jump) * dim + py) as usize];
+                    // update map
+                    if op == Up {
+                        for i in 0..dim - jump {
+                            next_state.map[(i * dim + pos) as usize] =
+                                last_state.map[((i + jump) * dim + pos) as usize];
+                        }
+                        for i in 0..jump {
+                            next_state.map[((dim - jump + i) * dim + pos) as usize] =
+                                last_state.map[(i * dim + pos) as usize];
+                        }
+                    } else if op == Down {
+                        for i in 0..jump {
+                            next_state.map[(i * dim + pos) as usize] =
+                                last_state.map[((dim - jump + i) * dim + pos) as usize];
+                        }
+                        for i in 0..dim - jump {
+                            next_state.map[((i + jump) * dim + pos) as usize] =
+                                last_state.map[(i * dim + pos) as usize];
+                        }
+                    } else if op == Left {
+                        next_state.map[(pos * dim) as usize..(pos * dim + dim) as usize]
+                            .rotate_left(jump as usize);
+                    } else if op == Right {
+                        next_state.map[(pos * dim) as usize..(pos * dim + dim) as usize]
+                            .rotate_right(jump as usize);
+                    } else {
+                        unreachable!();
                     }
-                    for i in 0..jump {
-                        next_state.map[((dim - jump + i) * dim + py) as usize] =
-                            last_state.map[(i * dim + py) as usize];
+
+                    // check if is target
+                    if next_state.map.is_sorted() {
+                        return next_state.steps;
                     }
-                } else if op == Down {
-                    for i in 0..jump {
-                        next_state.map[(i * dim + py) as usize] =
-                            last_state.map[((dim - jump + i) * dim + py) as usize];
-                    }
-                    for i in 0..dim - jump {
-                        next_state.map[((i + jump) * dim + py) as usize] =
-                            last_state.map[(i * dim + py) as usize];
-                    }
-                } else if op == Left {
-                    next_state.map[(px * dim) as usize..(px * dim + dim) as usize]
-                        .rotate_left(jump as usize);
-                } else if op == Right {
-                    next_state.map[(px * dim) as usize..(px * dim + dim) as usize]
-                        .rotate_right(jump as usize);
-                } else {
-                    unreachable!();
+                    // otherwise push to queue and continue searching
+
+                    // update cost
+                    next_state.cost = next_state.steps.len() + calc_h(dim, &next_state.map);
+
+                    queue.push(next_state);
                 }
-
-                // check if is target
-                if next_state.map.is_sorted() {
-                    return next_state.steps;
-                }
-                // otherwise push to queue and continue searching
-
-                // update cost
-                next_state.cost = next_state.steps.len() + calc_h(dim, &next_state.map);
-
-                // update position
-                let (p, delta) = match op {
-                    Up => (&mut next_state.pos.0, dim - jump),
-                    Down => (&mut next_state.pos.0, jump),
-                    Left => (&mut next_state.pos.1, dim - jump),
-                    Right => (&mut next_state.pos.1, jump),
-                    _ => unreachable!(),
-                };
-                *p += delta;
-                if *p >= dim {
-                    *p -= dim;
-                }
-
-                queue.push(next_state);
             }
         }
     }
