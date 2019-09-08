@@ -13,6 +13,14 @@ pub enum Operation {
     Right = 3,
     Down = 4,
 }
+use Operation::*;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Step {
+    pub op: Operation,
+    pub jump: u8,
+    pub pos: u8, // col if Up | Down, row if Left | Right
+}
 
 fn main() {
     let dim = get_arg();
@@ -22,7 +30,15 @@ fn main() {
     assert_eq!(map.len(), (dim * dim) as usize, "Dimension not match!");
 
     let res = astar::do_astar(dim, map);
-    println!("{:?} {}", res, res.len());
+    println!("Solution need {} steps:", res.len() - 1);
+    for step in res.iter().skip(1) {
+        match step.op {
+            Up | Down => println!("Col {} go {:?} {} times;", step.pos + 1, step.op, step.jump),
+            Left | Right => println!("Row {} go {:?} {} times;", step.pos + 1, step.op, step.jump),
+            Nop => {}
+        }
+    }
+    println!("Done.")
 }
 
 fn get_arg() -> u8 {
@@ -42,15 +58,9 @@ fn get_map() -> Vec<u8> {
 }
 
 mod astar {
-    use super::Operation;
+    use super::{Operation, Step};
     use std::cmp::{Ord, Ordering};
-
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    pub struct Step {
-        op: Operation,
-        jump: u8,
-        pos: u8, // col if Up | Down, row if Left | Right
-    }
+    use Operation::*;
 
     #[derive(Clone, PartialEq, Eq, Debug)]
     struct State {
@@ -85,8 +95,6 @@ mod astar {
     }
 
     fn get_all_directions(dim: u8) -> Vec<(Operation, u8)> {
-        use Operation::*;
-
         let mut res = Vec::new();
 
         // half up, half down
@@ -104,8 +112,6 @@ mod astar {
 
     #[inline]
     fn get_next_directions(dirs: &[(Operation, u8)], last_op: Operation) -> &[(Operation, u8)] {
-        use Operation::*;
-
         let half_len = dirs.len() / 2;
         match last_op {
             Up | Down => &dirs[..half_len],
@@ -116,7 +122,6 @@ mod astar {
 
     pub fn do_astar(dim: u8, map: Vec<u8>) -> Vec<Step> {
         use std::collections::BinaryHeap;
-        use Operation::*;
 
         // a min heap due to customized Ord
         let mut queue = BinaryHeap::new();
