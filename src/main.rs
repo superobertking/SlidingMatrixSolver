@@ -15,7 +15,14 @@ pub enum Operation {
 }
 use Operation::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+impl Default for Operation {
+    #[inline(always)]
+    fn default() -> Self {
+        Self::Nop
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Step {
     pub op: Operation,
     pub jump: u8,
@@ -111,7 +118,8 @@ mod astar {
         #[inline]
         fn cmp(&self, other: &Self) -> Ordering {
             match other.cost.cmp(&self.cost) {
-                Ordering::Equal => other.steps.len().cmp(&self.steps.len()),
+                // cost same, but steps longer
+                Ordering::Equal => self.steps.len().cmp(&other.steps.len()),
                 ord => ord,
             }
         }
@@ -148,17 +156,12 @@ mod astar {
 
         // a min heap due to customized Ord
         let mut queue = BinaryHeap::new();
-        // let mut cnt_ok = 0;
 
         // init state
         queue.push(Box::new(State {
             cost: calc_h(dim, &map),
             map: map,
-            steps: vec![Step {
-                op: Nop,
-                jump: 0,
-                pos: 0,
-            }],
+            steps: vec![Step::default()],
         }));
 
         let all_dirs = get_all_directions(dim);
@@ -193,11 +196,9 @@ mod astar {
                 for (op, jump) in next_dirs {
                     let (op, jump) = (*op, *jump);
                     let mut next_state = last_state.clone();
-                    // next_state.map.shrink_to_fit();
 
                     // push current step
                     next_state.steps.push(Step { op, jump, pos });
-                    // next_state.steps.shrink_to_fit();
 
                     // update map
                     if op == Up {
@@ -236,14 +237,7 @@ mod astar {
                     }
                     // otherwise push to queue and continue searching
 
-                    /*if next_state.cost - next_state.steps.len() <= 6 {
-                        cnt_ok += 1;
-                        if cnt_ok <= 30 {
-                            println!("{} {:?}", cnt_ok, next_state.map);
-                        } else {
-                            return next_state.steps;
-                        }
-                    }*/
+                    // TODO: may consider use multi-stage searches
 
                     // update cost
                     next_state.cost = next_state.steps.len() + calc_h(dim, &next_state.map);
@@ -285,29 +279,6 @@ mod astar {
             res += slot.iter().skip(1).map(|&b| b as usize).sum::<usize>();
         }
 
-        /* let mut x = 0;
-        for ci in 0..dim {
-            for cj in 0..dim {
-                let (tx, ty) = ((map[x] - 1) / dim, (map[x] - 1) % dim);
-
-                // res += (tx != ci || ty != cj) as usize;
-                res += (tx != ci) as usize;
-                res += (ty != cj) as usize;
-                // res += if tx > ci { tx - ci } else { ci - tx } as usize;
-                // res += if ty > cj { ty - cj } else { cj - ty } as usize;
-
-                x += 1;
-            }
-        } */
-
         res
     }
-
-    /* #[inline]
-    fn same_cost(a: Operation, b: Operation) -> bool {
-        // get discriminant
-        let (ad, bd) = (a as u32, b as u32);
-        // specially desinated discriminant
-        ad + bd == 5
-    } */
 }
