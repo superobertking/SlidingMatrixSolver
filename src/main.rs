@@ -30,7 +30,12 @@ fn main() {
     assert_eq!(map.len(), (dim * dim) as usize, "Dimension not match!");
 
     let res = astar::do_astar(dim, map);
+    output_res(dim, &res);
+}
+
+fn output_res(dim: u8, res: &[Step]) {
     println!("Solution need {} steps:", res.len() - 1);
+
     for step in res.iter().skip(1) {
         match step.op {
             Up | Down => println!("Col {} go {:?} {} times;", step.pos + 1, step.op, step.jump),
@@ -38,6 +43,24 @@ fn main() {
             Nop => {}
         }
     }
+
+    println!("Submission sequence:");
+    let mut iter = res.iter().skip(1).peekable();
+    while let Some(step) = iter.next() {
+        match step.op {
+            Right => print!("{},0,{}", step.pos, step.jump),
+            Left => print!("{},0,{}", step.pos, dim - step.jump),
+            Down => print!("{},1,{}", step.pos, step.jump),
+            Up => print!("{},1,{}", step.pos, dim - step.jump),
+            Nop => {}
+        }
+        if iter.peek().is_some() {
+            print!(",");
+        } else {
+            println!();
+        }
+    }
+
     println!("Done.")
 }
 
@@ -66,7 +89,7 @@ mod astar {
     struct State {
         cost: usize, // steps.len() + heuristic value
         map: Vec<u8>,
-        steps: Vec<Step>, // (Op, jumps)
+        steps: Vec<Step>,
     }
 
     impl State {
@@ -125,6 +148,7 @@ mod astar {
 
         // a min heap due to customized Ord
         let mut queue = BinaryHeap::new();
+        // let mut cnt_ok = 0;
 
         // init state
         queue.push(Box::new(State {
@@ -154,7 +178,7 @@ mod astar {
 
             let last_state = queue.pop().unwrap();
 
-            if false {
+            if true {
                 if iterations % 20000 == 0 {
                     println!("{} {}", last_state.steps.len(), last_state.cost);
                     println!("{}", queue.len());
@@ -169,9 +193,11 @@ mod astar {
                 for (op, jump) in next_dirs {
                     let (op, jump) = (*op, *jump);
                     let mut next_state = last_state.clone();
+                    // next_state.map.shrink_to_fit();
 
                     // push current step
                     next_state.steps.push(Step { op, jump, pos });
+                    // next_state.steps.shrink_to_fit();
 
                     // update map
                     if op == Up {
@@ -204,14 +230,27 @@ mod astar {
 
                     // check if is target
                     if next_state.map.is_sorted() {
+                        println!("[d] Search finished. Stats:");
+                        dbg!(queue.len());
                         return next_state.steps;
                     }
                     // otherwise push to queue and continue searching
 
+                    /*if next_state.cost - next_state.steps.len() <= 6 {
+                        cnt_ok += 1;
+                        if cnt_ok <= 30 {
+                            println!("{} {:?}", cnt_ok, next_state.map);
+                        } else {
+                            return next_state.steps;
+                        }
+                    }*/
+
                     // update cost
                     next_state.cost = next_state.steps.len() + calc_h(dim, &next_state.map);
 
-                    queue.push(next_state);
+                    if next_state.cost <= last_state.cost + 5 {
+                        queue.push(next_state);
+                    }
                 }
             }
         }
@@ -220,11 +259,38 @@ mod astar {
     fn calc_h(dim: u8, map: &[u8]) -> usize {
         assert_eq!((dim * dim) as usize, map.len());
         let mut res = 0;
-        let mut x = 0;
+
+        for ci in 0..dim {
+            let mut slot = vec![false; dim as usize];
+            for cj in 0..dim {
+                let ty = (map[(ci * dim + cj) as usize] - 1) % dim;
+                let mut dy = dim + ty - cj;
+                if dy >= dim {
+                    dy -= dim;
+                }
+                slot[dy as usize] = true;
+            }
+            res += slot.iter().skip(1).map(|&b| b as usize).sum::<usize>();
+        }
+        for cj in 0..dim {
+            let mut slot = vec![false; dim as usize];
+            for ci in 0..dim {
+                let tx = (map[(ci * dim + cj) as usize] - 1) / dim;
+                let mut dx = dim + tx - ci;
+                if dx >= dim {
+                    dx -= dim;
+                }
+                slot[dx as usize] = true;
+            }
+            res += slot.iter().skip(1).map(|&b| b as usize).sum::<usize>();
+        }
+
+        /* let mut x = 0;
         for ci in 0..dim {
             for cj in 0..dim {
                 let (tx, ty) = ((map[x] - 1) / dim, (map[x] - 1) % dim);
 
+                // res += (tx != ci || ty != cj) as usize;
                 res += (tx != ci) as usize;
                 res += (ty != cj) as usize;
                 // res += if tx > ci { tx - ci } else { ci - tx } as usize;
@@ -232,7 +298,7 @@ mod astar {
 
                 x += 1;
             }
-        }
+        } */
 
         res
     }
