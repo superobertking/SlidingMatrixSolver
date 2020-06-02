@@ -36,7 +36,7 @@ fn main() {
     let map = get_map();
     assert_eq!(map.len(), (dim * dim) as usize, "Dimension not match!");
 
-    let res = astar::do_astar(dim, map);
+    let res = astar::do_astar(dim, map).expect("Wrong algorithm: no solution found!");
     output_res(dim, &res);
 }
 
@@ -90,6 +90,7 @@ fn get_map() -> Vec<u8> {
 mod astar {
     use super::{Operation, Step};
     use std::cmp::{Ord, Ordering};
+    use std::collections::BinaryHeap;
     use Operation::*;
 
     #[derive(Clone, PartialEq, Eq, Debug)]
@@ -142,33 +143,35 @@ mod astar {
     }
 
     #[inline]
-    fn get_next_directions(dirs: &[(Operation, u8)], last_op: Operation) -> &[(Operation, u8)] {
+    fn get_next_direction_pairs(
+        dirs: &[(Operation, u8)],
+        last_op: Operation,
+    ) -> (&[(Operation, u8)], &[(Operation, u8)]) {
         let half_len = dirs.len() / 2;
         match last_op {
-            Up | Down => &dirs[..half_len],
-            Left | Right => &dirs[half_len..],
-            Nop => &dirs,
+            Up | Down => (&dirs[half_len..], &dirs[..half_len]),
+            Left | Right => (&dirs[..half_len], &dirs[half_len..]),
+            Nop => (&[], &dirs),
         }
     }
 
-    pub fn do_astar(dim: u8, map: Vec<u8>) -> Vec<Step> {
-        use std::collections::BinaryHeap;
-
-        // a min heap due to customized Ord
+    pub fn do_astar(dim: u8, map: Vec<u8>) -> Option<Vec<Step>> {
+        // a min heap according to customized Ord
         let mut queue = BinaryHeap::new();
+        // Boxing State seems to have a drop on performance.
 
         // init state
-        queue.push(Box::new(State {
+        queue.push(State {
             cost: calc_h(dim, &map),
             map: map,
             steps: vec![Step::default()],
-        }));
+        });
 
         let all_dirs = get_all_directions(dim);
 
         let mut iterations = 0;
 
-        loop {
+        while let Some(last_state) = queue.pop() {
             if false {
                 if iterations < 5 {
                     println!("{:?}", queue);
@@ -179,8 +182,6 @@ mod astar {
 
             iterations += 1;
 
-            let last_state = queue.pop().unwrap();
-
             if true {
                 if iterations % 20000 == 0 {
                     println!("{} {}", last_state.steps.len(), last_state.cost);
@@ -190,66 +191,105 @@ mod astar {
                 }
             }
 
-            let next_dirs = get_next_directions(&all_dirs, last_state.last_step().op);
+            // next same directions, next perpendicular direcitons
+            let (next_same, next_perp) =
+                get_next_direction_pairs(&all_dirs, last_state.last_step().op);
 
-            for pos in 0..dim {
-                for (op, jump) in next_dirs {
-                    let (op, jump) = (*op, *jump);
-                    let mut next_state = last_state.clone();
-
-                    // push current step
-                    next_state.steps.push(Step { op, jump, pos });
-
-                    // update map
-                    if op == Up {
-                        for i in 0..dim - jump {
-                            next_state.map[(i * dim + pos) as usize] =
-                                last_state.map[((i + jump) * dim + pos) as usize];
-                        }
-                        for i in 0..jump {
-                            next_state.map[((dim - jump + i) * dim + pos) as usize] =
-                                last_state.map[(i * dim + pos) as usize];
-                        }
-                    } else if op == Down {
-                        for i in 0..jump {
-                            next_state.map[(i * dim + pos) as usize] =
-                                last_state.map[((dim - jump + i) * dim + pos) as usize];
-                        }
-                        for i in 0..dim - jump {
-                            next_state.map[((i + jump) * dim + pos) as usize] =
-                                last_state.map[(i * dim + pos) as usize];
-                        }
-                    } else if op == Left {
-                        next_state.map[(pos * dim) as usize..(pos * dim + dim) as usize]
-                            .rotate_left(jump as usize);
-                    } else if op == Right {
-                        next_state.map[(pos * dim) as usize..(pos * dim + dim) as usize]
-                            .rotate_right(jump as usize);
-                    } else {
-                        unreachable!();
-                    }
-
-                    // check if is target
-                    if next_state.map.is_sorted() {
-                        println!("[d] Search finished. Stats:");
-                        dbg!(queue.len());
-                        return next_state.steps;
-                    }
-                    // otherwise push to queue and continue searching
-
-                    // TODO: may consider use multi-stage searches
-
-                    // update cost
-                    next_state.cost = next_state.steps.len() + calc_h(dim, &next_state.map);
-
-                    if next_state.cost <= last_state.cost + 5 {
-                        queue.push(next_state);
+            // h funciton not giving admissible results
+            if true {
+                // if false {
+                for pos in last_state.last_step().pos + 1..dim {
+                    let res = add_next_moves(dim, pos, &mut queue, next_same, &last_state);
+                    if res.is_some() {
+                        return res;
                     }
                 }
             }
+            for pos in 0..dim {
+                let res = add_next_moves(dim, pos, &mut queue, next_perp, &last_state);
+                if res.is_some() {
+                    return res;
+                }
+            }
         }
+
+        None
     }
 
+    fn add_next_moves(
+        dim: u8,
+        pos: u8,
+        queue: &mut BinaryHeap<State>,
+        next_dirs: &[(Operation, u8)],
+        last_state: &State,
+    ) -> Option<Vec<Step>> {
+        for &(op, jump) in next_dirs {
+            let mut next_state = last_state.clone();
+
+            // push current step
+            next_state.steps.push(Step { op, jump, pos });
+
+            // update map
+            match op {
+                Up => {
+                    for i in 0..dim - jump {
+                        next_state.map[(i * dim + pos) as usize] =
+                            last_state.map[((i + jump) * dim + pos) as usize];
+                    }
+                    for i in 0..jump {
+                        next_state.map[((dim - jump + i) * dim + pos) as usize] =
+                            last_state.map[(i * dim + pos) as usize];
+                    }
+                }
+                Down => {
+                    for i in 0..jump {
+                        next_state.map[(i * dim + pos) as usize] =
+                            last_state.map[((dim - jump + i) * dim + pos) as usize];
+                    }
+                    for i in 0..dim - jump {
+                        next_state.map[((i + jump) * dim + pos) as usize] =
+                            last_state.map[(i * dim + pos) as usize];
+                    }
+                }
+                Left => {
+                    next_state.map[(pos * dim) as usize..(pos * dim + dim) as usize]
+                        .rotate_left(jump as usize);
+                }
+                Right => {
+                    next_state.map[(pos * dim) as usize..(pos * dim + dim) as usize]
+                        .rotate_right(jump as usize);
+                }
+                Nop => unreachable!(),
+            }
+
+            // check if is target
+            if next_state.map.is_sorted() {
+                println!("[d] Search finished. Stats:");
+                dbg!(queue.len());
+                return Some(next_state.steps);
+            }
+            // otherwise push to queue and continue searching
+
+            // update cost
+            // next_state.cost = next_state.steps.len() + calc_h(dim, &next_state.map);
+            next_state.cost = next_state.steps.len() + calc_h(dim, &next_state.map);
+
+            if next_state.cost <= last_state.cost + 5 {
+                queue.push(next_state);
+            }
+        }
+
+        None
+    }
+
+    /// `h` function for A\* algorithms.
+    ///
+    /// The simple idea is as such. For each number on the map, calculate the
+    /// check if it requires a horizontal or vertical move, if it does, count
+    /// one for each direction. For the same line, we only count same number
+    /// of jumps as one.
+    ///
+    /// TODO: This h funciton is not admissible.
     fn calc_h(dim: u8, map: &[u8]) -> usize {
         assert_eq!((dim * dim) as usize, map.len());
         let mut res = 0;
@@ -257,7 +297,8 @@ mod astar {
         for ci in 0..dim {
             let mut slot = vec![false; dim as usize];
             for cj in 0..dim {
-                let ty = (map[(ci * dim + cj) as usize] - 1) % dim;
+                let n = map[(ci * dim + cj) as usize] - 1;
+                let (_, ty) = (n / dim, n % dim);
                 let mut dy = dim + ty - cj;
                 if dy >= dim {
                     dy -= dim;
@@ -269,7 +310,8 @@ mod astar {
         for cj in 0..dim {
             let mut slot = vec![false; dim as usize];
             for ci in 0..dim {
-                let tx = (map[(ci * dim + cj) as usize] - 1) / dim;
+                let n = map[(ci * dim + cj) as usize] - 1;
+                let (tx, _) = (n / dim, n % dim);
                 let mut dx = dim + tx - ci;
                 if dx >= dim {
                     dx -= dim;
@@ -280,5 +322,40 @@ mod astar {
         }
 
         res
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_h_4_finish() {
+            let h = calc_h(4, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+            assert_eq!(h, 0);
+        }
+
+        #[test]
+        fn test_h_4_one_h() {
+            let h = calc_h(4, &[1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 9, 13, 14, 15, 16]);
+            assert!(h <= 1);
+        }
+
+        #[test]
+        fn test_h_4_one_v() {
+            let h = calc_h(4, &[1, 2, 15, 4, 5, 6, 3, 8, 9, 10, 7, 12, 13, 14, 11, 16]);
+            assert!(h <= 1);
+        }
+
+        #[test]
+        fn test_h_4_two_perp() {
+            let h = calc_h(4, &[1, 2, 15, 4, 5, 6, 3, 8, 10, 7, 12, 9, 13, 14, 11, 16]);
+            assert!(h <= 2, "h: {}", h);
+        }
+
+        #[test]
+        fn test_h_4_two_same() {
+            let h = calc_h(4, &[5, 2, 15, 4, 9, 6, 3, 8, 13, 10, 7, 12, 1, 14, 11, 16]);
+            assert!(h <= 2, "h: {}", h);
+        }
     }
 }
