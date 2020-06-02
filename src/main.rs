@@ -1,4 +1,6 @@
 #![feature(is_sorted)]
+#![feature(const_generics)]
+#![allow(incomplete_features)]
 use std::env;
 use std::io;
 use std::io::prelude::*;
@@ -36,7 +38,16 @@ fn main() {
     let map = get_map();
     assert_eq!(map.len(), (dim * dim) as usize, "Dimension not match!");
 
-    let res = astar::do_astar(dim, map).expect("Wrong algorithm: no solution found!");
+    let res = match dim {
+        2 => astar::do_astar::<2, 4>(map),
+        3 => astar::do_astar::<3, 9>(map),
+        4 => astar::do_astar::<4, 16>(map),
+        5 => astar::do_astar::<5, 25>(map),
+        6 => astar::do_astar::<6, 36>(map),
+        _ => unimplemented!("Algorithm not yet implemented for this dimension."),
+    }
+    .expect("Wrong algorithm: no solution found!");
+
     output_res(dim, &res);
 }
 
@@ -93,21 +104,40 @@ mod astar {
     use std::collections::BinaryHeap;
     use Operation::*;
 
-    #[derive(Clone, PartialEq, Eq, Debug)]
-    struct State {
+    #[derive(Clone)]
+    struct State<const DIM: usize, const DIM2: usize> {
         cost: usize, // steps.len() + heuristic value
-        map: Vec<u8>,
         steps: Vec<Step>,
+        map: [u8; DIM2],
     }
 
-    impl State {
+    impl<const DIM: usize, const DIM2: usize> Default for State<DIM, DIM2> {
+        fn default() -> Self {
+            State {
+                cost: 0,
+                steps: vec![],
+                map: [0; DIM2],
+            }
+        }
+    }
+
+    impl<const DIM: usize, const DIM2: usize> State<DIM, DIM2> {
         #[inline]
         fn last_step(&self) -> Step {
             *self.steps.last().unwrap()
         }
     }
 
-    impl PartialOrd for State {
+    impl<const DIM: usize, const DIM2: usize> PartialEq for State<DIM, DIM2> {
+        #[inline]
+        fn eq(&self, other: &Self) -> bool {
+            self.cost == other.cost && self.map[..] == other.map[..] && self.steps == other.steps
+        }
+    }
+
+    impl<const DIM: usize, const DIM2: usize> Eq for State<DIM, DIM2> {}
+
+    impl<const DIM: usize, const DIM2: usize> PartialOrd for State<DIM, DIM2> {
         #[inline]
         fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
             Some(self.cmp(other))
@@ -115,7 +145,7 @@ mod astar {
     }
 
     /// Customized Ord for min-heap
-    impl Ord for State {
+    impl<const DIM: usize, const DIM2: usize> Ord for State<DIM, DIM2> {
         #[inline]
         fn cmp(&self, other: &Self) -> Ordering {
             match other.cost.cmp(&self.cost) {
@@ -155,26 +185,34 @@ mod astar {
         }
     }
 
-    pub fn do_astar(dim: u8, map: Vec<u8>) -> Option<Vec<Step>> {
+    pub fn do_astar<const DIM: usize, const DIM2: usize>(in_map: Vec<u8>) -> Option<Vec<Step>> {
         // a min heap according to customized Ord
         let mut queue = BinaryHeap::new();
         // Boxing State seems to have a drop on performance.
 
-        // init state
-        queue.push(State {
-            cost: calc_h(dim, &map),
-            map: map,
-            steps: vec![Step::default()],
-        });
+        assert_eq!(DIM * DIM, in_map.len());
 
-        let all_dirs = get_all_directions(dim);
+        // init state
+        let mut init_state = State::default();
+        init_state.cost = calc_h::<DIM>(&in_map);
+        init_state
+            .map
+            .iter_mut()
+            .zip(in_map.iter())
+            .map(|(a, b)| *a = *b)
+            .for_each(drop);
+        init_state.steps = vec![Step::default()];
+
+        queue.push(init_state);
+
+        let all_dirs = get_all_directions(DIM as u8);
 
         let mut iterations = 0;
 
         while let Some(last_state) = queue.pop() {
             if false {
                 if iterations < 5 {
-                    println!("{:?}", queue);
+                    // println!("{:?}", queue);
                 } else {
                     panic!("halt");
                 }
@@ -186,8 +224,9 @@ mod astar {
                 if iterations % 20000 == 0 {
                     println!("{} {}", last_state.steps.len(), last_state.cost);
                     println!("{}", queue.len());
-                    println!("{:?}", last_state.steps);
-                    println!("{:?}", last_state.map);
+                    println!("{:?}", &last_state.steps[..]);
+                    println!("{:?}", &last_state.map[..]);
+                    return Some(vec![]);
                 }
             }
 
@@ -198,15 +237,15 @@ mod astar {
             // h funciton not giving admissible results
             if true {
                 // if false {
-                for pos in last_state.last_step().pos + 1..dim {
-                    let res = add_next_moves(dim, pos, &mut queue, next_same, &last_state);
+                for pos in last_state.last_step().pos + 1..DIM as u8 {
+                    let res = add_next_moves::<DIM, DIM2>(pos, &mut queue, next_same, &last_state);
                     if res.is_some() {
                         return res;
                     }
                 }
             }
-            for pos in 0..dim {
-                let res = add_next_moves(dim, pos, &mut queue, next_perp, &last_state);
+            for pos in 0..DIM as u8 {
+                let res = add_next_moves::<DIM, DIM2>(pos, &mut queue, next_perp, &last_state);
                 if res.is_some() {
                     return res;
                 }
@@ -216,13 +255,14 @@ mod astar {
         None
     }
 
-    fn add_next_moves(
-        dim: u8,
+    fn add_next_moves<const DIM: usize, const DIM2: usize>(
         pos: u8,
-        queue: &mut BinaryHeap<State>,
+        queue: &mut BinaryHeap<State<DIM, DIM2>>,
         next_dirs: &[(Operation, u8)],
-        last_state: &State,
+        last_state: &State<DIM, DIM2>,
     ) -> Option<Vec<Step>> {
+        let dim = DIM as u8;
+
         for &(op, jump) in next_dirs {
             let mut next_state = last_state.clone();
 
@@ -272,7 +312,7 @@ mod astar {
 
             // update cost
             // next_state.cost = next_state.steps.len() + calc_h(dim, &next_state.map);
-            next_state.cost = next_state.steps.len() + calc_h(dim, &next_state.map);
+            next_state.cost = next_state.steps.len() + calc_h::<DIM>(&next_state.map);
 
             if next_state.cost <= last_state.cost + 5 {
                 queue.push(next_state);
@@ -290,7 +330,9 @@ mod astar {
     /// of jumps as one.
     ///
     /// TODO: This h funciton is not admissible.
-    fn calc_h(dim: u8, map: &[u8]) -> usize {
+    fn calc_h<const DIM: usize>(map: &[u8]) -> usize {
+        let dim = DIM as u8;
+
         assert_eq!((dim * dim) as usize, map.len());
         let mut res = 0;
 
@@ -330,31 +372,31 @@ mod astar {
 
         #[test]
         fn test_h_4_finish() {
-            let h = calc_h(4, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+            let h = calc_h::<4>(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
             assert_eq!(h, 0);
         }
 
         #[test]
         fn test_h_4_one_h() {
-            let h = calc_h(4, &[1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 9, 13, 14, 15, 16]);
+            let h = calc_h::<4>(&[1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 9, 13, 14, 15, 16]);
             assert!(h <= 1);
         }
 
         #[test]
         fn test_h_4_one_v() {
-            let h = calc_h(4, &[1, 2, 15, 4, 5, 6, 3, 8, 9, 10, 7, 12, 13, 14, 11, 16]);
+            let h = calc_h::<4>(&[1, 2, 15, 4, 5, 6, 3, 8, 9, 10, 7, 12, 13, 14, 11, 16]);
             assert!(h <= 1);
         }
 
         #[test]
         fn test_h_4_two_perp() {
-            let h = calc_h(4, &[1, 2, 15, 4, 5, 6, 3, 8, 10, 7, 12, 9, 13, 14, 11, 16]);
+            let h = calc_h::<4>(&[1, 2, 15, 4, 5, 6, 3, 8, 10, 7, 12, 9, 13, 14, 11, 16]);
             assert!(h <= 2, "h: {}", h);
         }
 
         #[test]
         fn test_h_4_two_same() {
-            let h = calc_h(4, &[5, 2, 15, 4, 9, 6, 3, 8, 13, 10, 7, 12, 1, 14, 11, 16]);
+            let h = calc_h::<4>(&[5, 2, 15, 4, 9, 6, 3, 8, 13, 10, 7, 12, 1, 14, 11, 16]);
             assert!(h <= 2, "h: {}", h);
         }
     }
