@@ -39,11 +39,10 @@ fn main() {
     assert_eq!(map.len(), (dim * dim) as usize, "Dimension not match!");
 
     let res = match dim {
-        2 => astar::do_astar::<2, 4>(map),
-        3 => astar::do_astar::<3, 9>(map),
-        4 => astar::do_astar::<4, 16>(map),
-        5 => astar::do_astar::<5, 25>(map),
-        6 => astar::do_astar::<6, 36>(map),
+        2 => astar::do_astar::<2>(map),
+        3 => astar::do_astar::<3>(map),
+        4 => astar::do_astar::<4>(map),
+        5 => astar::do_astar::<5>(map),
         _ => unimplemented!("Algorithm not yet implemented for this dimension."),
     }
     .expect("Wrong algorithm: no solution found!");
@@ -105,15 +104,17 @@ mod astar {
     use Operation::*;
 
     #[derive(Clone)]
-    struct State<const DIM: usize, const DIM2: usize> {
+    struct StateInner<const DIM: usize, const DIM2: usize> {
         cost: usize, // steps.len() + heuristic value
         steps: Vec<Step>,
         map: [u8; DIM2],
     }
 
-    impl<const DIM: usize, const DIM2: usize> Default for State<DIM, DIM2> {
+    type State<const DIM: usize> = StateInner<DIM, { DIM * DIM }>;
+
+    impl<const DIM: usize, const DIM2: usize> Default for StateInner<DIM, DIM2> {
         fn default() -> Self {
-            State {
+            Self {
                 cost: 0,
                 steps: vec![],
                 map: [0; DIM2],
@@ -121,23 +122,23 @@ mod astar {
         }
     }
 
-    impl<const DIM: usize, const DIM2: usize> State<DIM, DIM2> {
+    impl<const DIM: usize> State<DIM> {
         #[inline]
         fn last_step(&self) -> Step {
             *self.steps.last().unwrap()
         }
     }
 
-    impl<const DIM: usize, const DIM2: usize> PartialEq for State<DIM, DIM2> {
+    impl<const DIM: usize> PartialEq for State<DIM> {
         #[inline]
         fn eq(&self, other: &Self) -> bool {
             self.cost == other.cost && self.map[..] == other.map[..] && self.steps == other.steps
         }
     }
 
-    impl<const DIM: usize, const DIM2: usize> Eq for State<DIM, DIM2> {}
+    impl<const DIM: usize> Eq for State<DIM> {}
 
-    impl<const DIM: usize, const DIM2: usize> PartialOrd for State<DIM, DIM2> {
+    impl<const DIM: usize> PartialOrd for State<DIM> {
         #[inline]
         fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
             Some(self.cmp(other))
@@ -145,7 +146,7 @@ mod astar {
     }
 
     /// Customized Ord for min-heap
-    impl<const DIM: usize, const DIM2: usize> Ord for State<DIM, DIM2> {
+    impl<const DIM: usize> Ord for State<DIM> {
         #[inline]
         fn cmp(&self, other: &Self) -> Ordering {
             match other.cost.cmp(&self.cost) {
@@ -185,7 +186,7 @@ mod astar {
         }
     }
 
-    pub fn do_astar<const DIM: usize, const DIM2: usize>(in_map: Vec<u8>) -> Option<Vec<Step>> {
+    pub fn do_astar<const DIM: usize>(in_map: Vec<u8>) -> Option<Vec<Step>> {
         // a min heap according to customized Ord
         let mut queue = BinaryHeap::new();
         // Boxing State seems to have a drop on performance.
@@ -226,7 +227,6 @@ mod astar {
                     println!("{}", queue.len());
                     println!("{:?}", &last_state.steps[..]);
                     println!("{:?}", &last_state.map[..]);
-                    return Some(vec![]);
                 }
             }
 
@@ -238,14 +238,14 @@ mod astar {
             if true {
                 // if false {
                 for pos in last_state.last_step().pos + 1..DIM as u8 {
-                    let res = add_next_moves::<DIM, DIM2>(pos, &mut queue, next_same, &last_state);
+                    let res = add_next_moves::<DIM>(pos, &mut queue, next_same, &last_state);
                     if res.is_some() {
                         return res;
                     }
                 }
             }
             for pos in 0..DIM as u8 {
-                let res = add_next_moves::<DIM, DIM2>(pos, &mut queue, next_perp, &last_state);
+                let res = add_next_moves::<DIM>(pos, &mut queue, next_perp, &last_state);
                 if res.is_some() {
                     return res;
                 }
@@ -255,11 +255,11 @@ mod astar {
         None
     }
 
-    fn add_next_moves<const DIM: usize, const DIM2: usize>(
+    fn add_next_moves<const DIM: usize>(
         pos: u8,
-        queue: &mut BinaryHeap<State<DIM, DIM2>>,
+        queue: &mut BinaryHeap<State<DIM>>,
         next_dirs: &[(Operation, u8)],
-        last_state: &State<DIM, DIM2>,
+        last_state: &State<DIM>,
     ) -> Option<Vec<Step>> {
         let dim = DIM as u8;
 
